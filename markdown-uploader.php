@@ -8,7 +8,11 @@ Author: Narcolepticnerd & Copilot
 
 // Add meta box to post/page editor
 add_action('add_meta_boxes', function() {
-    add_meta_box('markdown_uploader', 'Markdown Uploader', 'markdown_uploader_meta_box', ['post', 'page'], 'normal', 'high');
+    // Add meta box to all public post types
+    $post_types = get_post_types(['public' => true], 'names');
+    foreach ($post_types as $pt) {
+        add_meta_box('markdown_uploader', 'Markdown Uploader', 'markdown_uploader_meta_box', $pt, 'normal', 'high');
+    }
 });
 
 function markdown_uploader_meta_box($post) {
