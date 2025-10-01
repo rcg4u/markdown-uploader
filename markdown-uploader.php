@@ -17,6 +17,39 @@ add_action('add_meta_boxes', function() {
 
 function markdown_uploader_meta_box($post) {
     echo '<label for="markdown_content">Paste Markdown:</label><br />';
+    // Advanced toolbar
+    echo '<div id="markdown_toolbar" style="margin-bottom:6px;">';
+    $buttons = [
+        // Markdown
+        ['Bold', '**bold**', 'markdown'],
+        ['Italic', '*italic*', 'markdown'],
+        ['Heading', '# Heading', 'markdown'],
+        ['Link', '[text](url)', 'markdown'],
+        ['Image', '![alt](url)', 'markdown'],
+        ['Code', '`code`', 'markdown'],
+        ['Blockquote', '> quote', 'markdown'],
+        ['UL', '- List item', 'markdown'],
+        ['OL', '1. List item', 'markdown'],
+        ['HR', '---', 'markdown'],
+        // HTML
+        ['<b>', '<b>bold</b>', 'html'],
+        ['<i>', '<i>italic</i>', 'html'],
+        ['<h2>', '<h2>Heading</h2>', 'html'],
+        ['<a>', '<a href="url">text</a>', 'html'],
+        ['<img>', '<img src="url" alt="alt" />', 'html'],
+        ['<code>', '<code>code</code>', 'html'],
+        ['<blockquote>', '<blockquote>quote</blockquote>', 'html'],
+        ['<ul>', '<ul>\n  <li>Item</li>\n</ul>', 'html'],
+        ['<ol>', '<ol>\n  <li>Item</li>\n</ol>', 'html'],
+        ['<hr>', '<hr />', 'html'],
+    ];
+    foreach ($buttons as $btn) {
+        $label = htmlspecialchars($btn[0]);
+        $snippet = htmlspecialchars($btn[1]);
+        $type = $btn[2];
+        echo "<button type='button' class='md-toolbar-btn' data-snippet='{$snippet}' data-type='{$type}' style='margin-right:2px;margin-bottom:2px;'>{$label}</button>";
+    }
+    echo '</div>';
     echo '<textarea id="markdown_content" rows="10" style="width:100%"></textarea><br /><br />';
     echo '<label for="markdown_file">Or upload Markdown file:</label><br />';
     echo '<input type="file" id="markdown_file" accept=".md,.markdown,.txt" /><br />';
@@ -29,8 +62,27 @@ function markdown_uploader_meta_box($post) {
     if (typeof ajaxurl === 'undefined') {
         var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
     }
-    // File upload to textarea
+    // Toolbar button logic
+    function insertAtCursor(textarea, snippet) {
+        if (!textarea) return;
+        var scrollPos = textarea.scrollTop;
+        var caretPos = textarea.selectionStart;
+        var endPos = textarea.selectionEnd;
+        var value = textarea.value;
+        textarea.value = value.substring(0, caretPos) + snippet + value.substring(endPos, value.length);
+        textarea.selectionStart = textarea.selectionEnd = caretPos + snippet.length;
+        textarea.focus();
+        textarea.scrollTop = scrollPos;
+    }
     document.addEventListener('DOMContentLoaded', function() {
+        // Toolbar button events
+        document.querySelectorAll('.md-toolbar-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                var snippet = btn.getAttribute('data-snippet');
+                var textarea = document.getElementById('markdown_content');
+                insertAtCursor(textarea, snippet);
+            });
+        });
         document.getElementById('markdown_file').addEventListener('change', function(e) {
             var file = e.target.files[0];
             if (!file) return;
