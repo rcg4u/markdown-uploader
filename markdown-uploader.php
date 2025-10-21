@@ -53,11 +53,23 @@ function markdown_uploader_meta_box($post) {
     echo '<textarea id="markdown_content" rows="10" style="width:100%"></textarea><br /><br />';
     echo '<label for="markdown_file">Or upload Markdown file:</label><br />';
     echo '<input type="file" id="markdown_file" accept=".md,.markdown,.txt" /><br />';
+    // New controls: Load current post content and Resubmit (replace content)
+    echo '<button type="button" id="markdown_load_btn" style="margin:10px 5px;">Load Current</button>';
     echo '<button type="button" id="markdown_insert_btn" style="margin:10px 0;">Convert & Insert</button>';
     echo '<button type="button" id="markdown_clear_btn" style="margin:10px 5px;">Clear</button>';
     echo '<button type="button" id="markdown_clear_gb_btn" style="margin:10px 0;">Clear Gutenberg</button>';
+    echo '<button type="button" id="markdown_resubmit_btn" style="margin:10px 5px;">Resubmit</button>';
+    echo '<button type="button" id="markdown_preview_btn" style="margin:10px 5px;">Preview</button>';
+    echo '<label style="margin-left:8px;"><input type="checkbox" id="markdown_live_preview" /> Live Preview</label>';
     echo '<span id="markdown_status" style="margin-left:10px;"></span>';
+    // Preview panel container
+    echo '<div id="markdown_preview_container" style="margin-top:12px;border:1px solid #ddd;border-radius:4px;background:#fafafa;">'
+        . '<div style="padding:8px 10px;border-bottom:1px solid #eee;font-weight:600;">Preview</div>'
+        . '<div id="markdown_preview" style="padding:10px;min-height:120px;overflow:auto;background:#fff;"></div>'
+        . '</div>';
     ?>
+    <!-- HTML -> Markdown converter for Load Current -->
+    <script src="https://cdn.jsdelivr.net/npm/turndown@7.1.2/dist/turndown.min.js"></script>
     <script type="text/javascript">
     if (typeof ajaxurl === 'undefined') {
         var ajaxurl = '<?php echo admin_url('admin-ajax.php'); ?>';
@@ -89,9 +101,125 @@ function markdown_uploader_meta_box($post) {
             var reader = new FileReader();
             reader.onload = function(evt) {
                 document.getElementById('markdown_content').value = evt.target.result;
+                // Update preview if live preview is enabled
+                var live = document.getElementById('markdown_live_preview');
+                if (live && live.checked) {
+                    if (typeof renderPreview === 'function') renderPreview();
+                }
             };
             reader.readAsText(file);
         });
+        // Load Current: pull existing post content (Gutenberg or Classic) and convert to Markdown
+        var getCurrentPostHTML = function() {
+            try {
+                if (window.wp && wp.data && wp.data.select && typeof wp.data.select === 'function') {
+                    var editorSel = wp.data.select('core/editor');
+                    if (editorSel && typeof editorSel.getEditedPostContent === 'function') {
+                        // Serialized blocks HTML
+                        return editorSel.getEditedPostContent() || '';
+                    }
+                    if (editorSel && typeof editorSel.getBlocks === 'function' && wp.blocks && typeof wp.blocks.serialize === 'function') {
+                        var blks = editorSel.getBlocks();
+                        return wp.blocks.serialize(blks) || '';
+                    }
+                }
+                // Classic editor (TinyMCE or textarea)
+                if (window.tinymce && tinymce.get && tinymce.get('content')) {
+                    return tinymce.get('content').getContent({ format: 'raw' }) || '';
+                }
+                var classic = document.getElementById('content');
+                if (classic) return classic.value || '';
+            } catch (e) {
+                console.warn('Failed to get current post HTML', e);
+            }
+            return '';
+        };
+        var htmlToMarkdown = function(html) {
+            try {
+                if (window.TurndownService) {
+                    var td = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
+                    return td.turndown(html || '');
+                }
+            } catch (e) {
+                console.warn('Turndown conversion failed', e);
+            }
+            // Fallback: return original HTML if converter unavailable
+            return html || '';
+        };
+        document.getElementById('markdown_load_btn').addEventListener('click', function() {
+            var status = document.getElementById('markdown_status');
+            status.textContent = 'Loading current content...';
+            var html = getCurrentPostHTML();
+            if (!html) {
+                status.textContent = 'No content found.';
+                return;
+            }
+            var md = htmlToMarkdown(html);
+            document.getElementById('markdown_content').value = md;
+            status.textContent = 'Loaded into textarea.';
+            // Update preview if live preview is enabled
+            var live = document.getElementById('markdown_live_preview');
+            if (live && live.checked) {
+                if (typeof renderPreview === 'function') renderPreview();
+            }
+        });
+        // --- Preview logic ---
+        function debounce(fn, delay) {
+            var t;
+            return function() {
+                var ctx = this, args = arguments;
+                clearTimeout(t);
+                t = setTimeout(function(){ fn.apply(ctx, args); }, delay);
+            };
+        }
+        function renderPreview() {
+            var md = document.getElementById('markdown_content').value || '';
+            var preview = document.getElementById('markdown_preview');
+            var status = document.getElementById('markdown_status');
+            if (!md.trim()) { preview.innerHTML = ''; return; }
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', ajaxurl, true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    preview.innerHTML = xhr.responseText || '';
+                    if (status) status.textContent = 'Preview updated.';
+                } else {
+                    preview.innerHTML = '<em>Preview error: ' + xhr.status + '</em>';
+                }
+            };
+            xhr.onerror = function() {
+                preview.innerHTML = '<em>Network error while rendering preview.</em>';
+            };
+            xhr.send('action=markdown_uploader_convert&markdown=' + encodeURIComponent(md));
+        }
+        var debouncedPreviewHandler = null;
+        function enableLivePreview() {
+            var ta = document.getElementById('markdown_content');
+            if (!debouncedPreviewHandler) debouncedPreviewHandler = debounce(renderPreview, 400);
+            ta.addEventListener('input', debouncedPreviewHandler);
+            renderPreview();
+        }
+        function disableLivePreview() {
+            var ta = document.getElementById('markdown_content');
+            if (debouncedPreviewHandler) ta.removeEventListener('input', debouncedPreviewHandler);
+        }
+        var liveToggle = document.getElementById('markdown_live_preview');
+        if (liveToggle) {
+            liveToggle.addEventListener('change', function() {
+                if (liveToggle.checked) {
+                    enableLivePreview();
+                } else {
+                    disableLivePreview();
+                }
+            });
+        }
+        var previewBtn = document.getElementById('markdown_preview_btn');
+        if (previewBtn) {
+            previewBtn.addEventListener('click', function() {
+                renderPreview();
+            });
+        }
         document.getElementById('markdown_insert_btn').addEventListener('click', function() {
             var md = document.getElementById('markdown_content').value;
             var status = document.getElementById('markdown_status');
@@ -144,6 +272,52 @@ function markdown_uploader_meta_box($post) {
             } else {
                 alert('Gutenberg editor not detected.');
             }
+        });
+        // Resubmit: replace entire post content with converted Markdown
+        document.getElementById('markdown_resubmit_btn').addEventListener('click', function() {
+            var md = document.getElementById('markdown_content').value;
+            var status = document.getElementById('markdown_status');
+            status.textContent = 'Resubmitting...';
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', ajaxurl, true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    var html = xhr.responseText;
+                    // Gutenberg: clear and insert as blocks
+                    if (window.wp && wp.data && wp.data.dispatch && wp.blocks && wp.blocks.rawHandler) {
+                        try {
+                            wp.data.dispatch('core/editor').resetBlocks([]);
+                            var blocks = wp.blocks.rawHandler({ HTML: html });
+                            if (blocks && blocks.length) {
+                                wp.data.dispatch('core/editor').insertBlocks(blocks);
+                                status.textContent = 'Replaced post content (blocks)!';
+                                return;
+                            }
+                        } catch (e) {
+                            console.warn('Gutenberg resubmit failed', e);
+                        }
+                    }
+                    // Classic editor: overwrite content
+                    var classic = document.getElementById('content');
+                    if (window.tinymce && tinymce.get && tinymce.get('content')) {
+                        tinymce.get('content').setContent(html || '');
+                        status.textContent = 'Replaced post content (classic)!';
+                        return;
+                    } else if (classic) {
+                        classic.value = html || '';
+                        status.textContent = 'Replaced post content (classic)!';
+                        return;
+                    }
+                    status.textContent = 'Could not replace content. Copy & paste manually.';
+                } else {
+                    status.textContent = 'Error: ' + xhr.status;
+                }
+            };
+            xhr.onerror = function() {
+                status.textContent = 'Network error.';
+            };
+            xhr.send('action=markdown_uploader_convert&markdown=' + encodeURIComponent(md));
         });
     });
     </script>
