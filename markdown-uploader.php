@@ -60,12 +60,23 @@ function markdown_uploader_meta_box($post) {
     echo '<button type="button" id="markdown_clear_gb_btn" style="margin:10px 0;">Clear Gutenberg</button>';
     echo '<button type="button" id="markdown_resubmit_btn" style="margin:10px 5px;">Resubmit</button>';
     echo '<button type="button" id="markdown_preview_btn" style="margin:10px 5px;">Preview</button>';
+    echo '<button type="button" id="markdown_get_html_btn" style="margin:10px 5px;">Get HTML</button>';
     echo '<label style="margin-left:8px;"><input type="checkbox" id="markdown_live_preview" /> Live Preview</label>';
     echo '<span id="markdown_status" style="margin-left:10px;"></span>';
     // Preview panel container
     echo '<div id="markdown_preview_container" style="margin-top:12px;border:1px solid #ddd;border-radius:4px;background:#fafafa;">'
         . '<div style="padding:8px 10px;border-bottom:1px solid #eee;font-weight:600;">Preview</div>'
         . '<div id="markdown_preview" style="padding:10px;min-height:120px;overflow:auto;background:#fff;"></div>'
+        . '</div>';
+    // HTML output container (hidden by default)
+    echo '<div id="markdown_html_container" style="display:none;margin-top:12px;border:1px solid #ddd;border-radius:4px;background:#fafafa;">'
+        . '<div style="padding:8px 10px;border-bottom:1px solid #eee;display:flex;align-items:center;gap:8px;">'
+        . '<span style="font-weight:600;">HTML Output</span>'
+        . '<button type="button" id="markdown_html_copy_btn" class="button" style="margin-left:auto;">Copy</button>'
+        . '<button type="button" id="markdown_html_download_btn" class="button">Download .html</button>'
+        . '<button type="button" id="markdown_html_hide_btn" class="button">Hide</button>'
+        . '</div>'
+        . '<textarea id="markdown_html_output" style="width:100%;min-height:140px;padding:10px;border:0;border-top:1px solid #eee;box-sizing:border-box;"></textarea>'
         . '</div>';
     ?>
     <!-- HTML -> Markdown converter for Load Current -->
@@ -218,6 +229,84 @@ function markdown_uploader_meta_box($post) {
         if (previewBtn) {
             previewBtn.addEventListener('click', function() {
                 renderPreview();
+            });
+        }
+        // Get HTML: convert and show/copy/download
+        var getHtmlBtn = document.getElementById('markdown_get_html_btn');
+        var htmlContainer = document.getElementById('markdown_html_container');
+        var htmlOutput = document.getElementById('markdown_html_output');
+        var htmlCopyBtn = document.getElementById('markdown_html_copy_btn');
+        var htmlDownloadBtn = document.getElementById('markdown_html_download_btn');
+        var htmlHideBtn = document.getElementById('markdown_html_hide_btn');
+        function populateHtmlOutput(html) {
+            if (!htmlContainer || !htmlOutput) return;
+            htmlOutput.value = html || '';
+            htmlContainer.style.display = 'block';
+        }
+        function convertMdToHtml(md, cb) {
+            var xhr = new XMLHttpRequest();
+            xhr.open('POST', ajaxurl, true);
+            xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    cb(null, xhr.responseText || '');
+                } else {
+                    cb(new Error('Convert error ' + xhr.status));
+                }
+            };
+            xhr.onerror = function() { cb(new Error('Network error')); };
+            xhr.send('action=markdown_uploader_convert&markdown=' + encodeURIComponent(md || ''));
+        }
+        if (getHtmlBtn) {
+            getHtmlBtn.addEventListener('click', function() {
+                var md = document.getElementById('markdown_content').value || '';
+                var status = document.getElementById('markdown_status');
+                if (status) status.textContent = 'Converting to HTML...';
+                convertMdToHtml(md, function(err, html){
+                    if (status) status.textContent = err ? ('Error: ' + err.message) : 'HTML ready';
+                    if (!err) {
+                        populateHtmlOutput(html);
+                        // Attempt to copy to clipboard automatically
+                        try {
+                            htmlOutput.focus();
+                            htmlOutput.select();
+                            document.execCommand('copy');
+                            if (status) status.textContent = 'HTML copied to clipboard';
+                        } catch (e) {}
+                    }
+                });
+            });
+        }
+        if (htmlCopyBtn) {
+            htmlCopyBtn.addEventListener('click', function(){
+                if (!htmlOutput) return;
+                htmlOutput.focus();
+                htmlOutput.select();
+                var ok = false;
+                try { ok = document.execCommand('copy'); } catch(e) {}
+                var status = document.getElementById('markdown_status');
+                if (status) status.textContent = ok ? 'HTML copied to clipboard' : 'Press Ctrl/Cmd+C to copy';
+            });
+        }
+        if (htmlDownloadBtn) {
+            htmlDownloadBtn.addEventListener('click', function(){
+                if (!htmlOutput) return;
+                var blob = new Blob([htmlOutput.value || ''], {type: 'text/html;charset=utf-8'});
+                var url = URL.createObjectURL(blob);
+                var a = document.createElement('a');
+                a.href = url;
+                a.download = 'converted.html';
+                document.body.appendChild(a);
+                a.click();
+                setTimeout(function(){
+                    URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                }, 0);
+            });
+        }
+        if (htmlHideBtn) {
+            htmlHideBtn.addEventListener('click', function(){
+                if (htmlContainer) htmlContainer.style.display = 'none';
             });
         }
         document.getElementById('markdown_insert_btn').addEventListener('click', function() {
